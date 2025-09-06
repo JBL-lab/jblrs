@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>야구팀 기록 관리 (LocalStorage)</title>
+  <title>야구팀 기록 관리 (Firebase 공유)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <meta name="color-scheme" content="light dark" />
   <style>
@@ -16,7 +16,7 @@
 <body class="min-h-screen bg-gray-50 text-gray-900">
   <header class="sticky top-0 z-20 bg-white/80 backdrop-blur border-b">
     <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-      <h1 class="text-xl font-bold">⚾️ 야구팀 기록 관리 (LocalStorage)</h1>
+      <h1 class="text-xl font-bold">⚾️ 야구팀 기록 관리 (Firebase Firestore 공유)</h1>
     </div>
   </header>
 
@@ -138,15 +138,52 @@
         <button id="closeProfileBtn" class="rounded-xl px-4 py-2 bg-gray-300">닫기</button>
       </div>
     </section>
+
+    <!-- Firebase 설정 가이드 -->
+    <section class="bg-white rounded-2xl shadow p-4">
+      <h2 class="text-lg font-semibold mb-2">Firebase 설정 요약</h2>
+      <ol class="list-decimal pl-6 text-sm space-y-1 text-gray-700">
+        <li>Firebase 콘솔에서 프로젝트 생성 → Firestore 생성</li>
+        <li>Authentication 필요 없음</li>
+        <li>아래 <code>firebaseConfig</code>에 구성값 붙여넣기</li>
+        <li>보안 규칙 테스트용:</li>
+      </ol>
+      <pre class="bg-gray-900 text-gray-100 p-3 rounded-xl overflow-x-auto text-xs">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}</pre>
+    </section>
   </main>
 
   <footer class="max-w-5xl mx-auto px-4 py-10 text-center text-xs text-gray-500">
-    LocalStorage에 저장됩니다.
+    Firebase Firestore 공유 버전
   </footer>
 
-  <script>
-    let teams = JSON.parse(localStorage.getItem('teams') || '[]');
-    let players = JSON.parse(localStorage.getItem('players') || '[]');
+  <!-- Firebase + App Logic -->
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+    import {
+      getFirestore, collection, addDoc, doc,
+      updateDoc, deleteDoc, onSnapshot,
+      serverTimestamp, increment, query
+    } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyD7v6Ihvl0DebF5Dlswh0x4mH8qfjgwuE0",
+      authDomain: "jblrs-ed141.firebaseapp.com",
+      projectId: "jblrs-ed141",
+      storageBucket: "jblrs-ed141.firebasestorage.app",
+      messagingSenderId: "855919162701",
+      appId: "1:855919162701:web:97ec1f81af3c6a63497304",
+      measurementId: "G-QJ80TY8EKE"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
 
     const teamNameInput = document.getElementById('teamName');
     const addTeamBtn = document.getElementById('addTeamBtn');
@@ -164,7 +201,6 @@
     const saveRecordBtn = document.getElementById('saveRecordBtn');
     const boardTeamFilter = document.getElementById('boardTeamFilter');
     const boardBody = document.getElementById('boardBody');
-
     const playerProfile = document.getElementById('playerProfile');
     const profileContent = document.getElementById('profileContent');
     const profileMemo = document.getElementById('profileMemo');
@@ -172,147 +208,125 @@
     const closeProfileBtn = document.getElementById('closeProfileBtn');
 
     let currentProfileId = null;
-    let lastSelectedTeamId = playerTeamSelect.value;
+    let lastSelectedTeamId = localStorage.getItem('lastSelectedTeamId') || '';
+    let teamsCache = [];
+    let playersCache = [];
 
-    function saveData() {
-      localStorage.setItem('teams', JSON.stringify(teams));
-      localStorage.setItem('players', JSON.stringify(players));
-      renderTeams();
-      renderBoard();
+    function opt(el, value, label) { const o = document.createElement('option'); o.value=value; o.textContent=label; el.appendChild(o); }
+    function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+    function toInt(v){ const n=parseInt(v,10); return Number.isFinite(n)?n:0; }
 
-      // 선수 추가 시 마지막 선택된 팀 유지
-      if (lastSelectedTeamId) {
+    function subscribeTeams(){
+      const q = query(collection(db,'teams'));
+      onSnapshot(q, (snap) => {
+        teamsCache = snap.docs.map(d => ({ id:d.id, ...d.data() })).sort((a,b)=>a.name.localeCompare(b.name));
+        renderTeams();
+      });
+    }
+
+    function subscribePlayers(){
+      const q = query(collection(db,'players'));
+      onSnapshot(q, (snap) => {
+        playersCache = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+        renderBoard();
+        const teamId = recordTeamSelect.value;
+        if (teamId) populatePlayers(teamId, recordPlayerSelect);
+      });
+    }
+
+    function renderTeams(){
+      [teamSelect, playerTeamSelect, recordTeamSelect, boardTeamFilter].forEach(sel => {
+        clear(sel); opt(sel,'','— 팀 선택 —');
+        teamsCache.forEach(t => opt(sel, t.id, t.name));
+      });
+      if (lastSelectedTeamId && teamsCache.some(t=>t.id===lastSelectedTeamId)) {
         playerTeamSelect.value = lastSelectedTeamId;
       }
     }
 
-    function renderTeams() {
-      [teamSelect, playerTeamSelect, recordTeamSelect, boardTeamFilter].forEach(sel => {
-        sel.innerHTML = '<option value="">— 팀 선택 —</option>';
-        teams.forEach(t => {
-          const o = document.createElement('option');
-          o.value = t.id;
-          o.textContent = t.name;
-          sel.appendChild(o);
+    async function populatePlayers(teamId, select){
+      clear(select); opt(select,'','— 선수 선택 —');
+      playersCache.filter(p=>p.teamId===teamId).sort((a,b)=>a.name.localeCompare(b.name)).forEach(p=> opt(select,p.id,p.name));
+    }
+
+    function renderBoard(){
+      clear(boardBody);
+      const filterTeam = boardTeamFilter.value || '';
+      playersCache
+        .filter(p => !filterTeam || p.teamId===filterTeam)
+        .sort((a,b)=>a.name.localeCompare(b.name))
+        .forEach(p => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td class="px-3 py-2"><button class="text-blue-600 underline profileBtn" data-id="${p.id}">${escapeHtml(p.name)}</button> <span class="text-xs text-gray-500">(${escapeHtml(teamName(p.teamId))})</span></td>
+            <td class="px-3 py-2 text-right">${p.hr||0}</td>
+            <td class="px-3 py-2 text-right">${p.hits||0}</td>
+            <td class="px-3 py-2 text-right">${p.pitches||0}</td>
+            <td class="px-3 py-2 text-right">${p.strikes||0}</td>
+            <td class="px-3 py-2 text-right">${p.saves||0}</td>
+            <td class="px-3 py-2 text-right"><button class="deleteBtn text-red-600" data-id="${p.id}">삭제</button></td>`;
+          boardBody.appendChild(tr);
         });
-      });
+
+      document.querySelectorAll('.deleteBtn').forEach(btn => btn.addEventListener('click', async () => {
+        await deleteDoc(doc(db,'players', btn.dataset.id));
+      }));
+      document.querySelectorAll('.profileBtn').forEach(btn => btn.addEventListener('click', () => showProfile(btn.dataset.id)));
     }
 
-    function renderPlayers(teamId, select) {
-      select.innerHTML = '<option value="">— 선수 선택 —</option>';
-      players.filter(p => p.teamId === teamId).forEach(p => {
-        const o = document.createElement('option');
-        o.value = p.id;
-        o.textContent = p.name;
-        select.appendChild(o);
-      });
-    }
+    function teamName(id){ const t=teamsCache.find(t=>t.id===id); return t? t.name : '-'; }
 
-    function renderBoard() {
-      boardBody.innerHTML = '';
-      const filterTeam = boardTeamFilter.value;
-      players.filter(p => !filterTeam || p.teamId === filterTeam).forEach(p => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td class="px-3 py-2"><button class="text-blue-600 underline profileBtn" data-id="${p.id}">${p.name}</button> <span class="text-xs text-gray-500">(${teamName(p.teamId)})</span></td>
-          <td class="px-3 py-2 text-right">${p.hr||0}</td>
-          <td class="px-3 py-2 text-right">${p.hits||0}</td>
-          <td class="px-3 py-2 text-right">${p.pitches||0}</td>
-          <td class="px-3 py-2 text-right">${p.strikes||0}</td>
-          <td class="px-3 py-2 text-right">${p.saves||0}</td>
-          <td class="px-3 py-2 text-right"><button class="deleteBtn text-red-600" data-id="${p.id}">삭제</button></td>
-        `;
-        boardBody.appendChild(tr);
-      });
-
-      document.querySelectorAll('.deleteBtn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const id = btn.dataset.id;
-          players = players.filter(p => p.id !== id);
-          saveData();
-        });
-      });
-
-      document.querySelectorAll('.profileBtn').forEach(btn => {
-        btn.addEventListener('click', () => showProfile(btn.dataset.id));
-      });
-    }
-
-    function teamName(id) {
-      const t = teams.find(t => t.id === id);
-      return t ? t.name : '-';
-    }
-
-    addTeamBtn.addEventListener('click', () => {
-      const name = teamNameInput.value.trim();
-      if (!name) return;
-      teams.push({ id: Date.now().toString(), name });
-      teamNameInput.value = '';
-      saveData();
+    addTeamBtn.addEventListener('click', async () => {
+      const name = teamNameInput.value.trim(); if (!name) return;
+      await addDoc(collection(db,'teams'), { name, createdAt: serverTimestamp() });
+      teamNameInput.value='';
     });
 
-    addPlayerBtn.addEventListener('click', () => {
-      const teamId = playerTeamSelect.value;
-      const name = playerNameInput.value.trim();
+    addPlayerBtn.addEventListener('click', async () => {
+      const teamId = playerTeamSelect.value; const name = playerNameInput.value.trim();
       if (!teamId || !name) return;
-      players.push({ id: Date.now().toString(), teamId, name, hr:0,hits:0,pitches:0,strikes:0,saves:0, memo:'' });
-      playerNameInput.value = '';
-      lastSelectedTeamId = teamId; // 마지막 선택된 팀 저장
-      saveData();
+      await addDoc(collection(db,'players'), { teamId, name, hr:0,hits:0,pitches:0,strikes:0,saves:0, memo:'', createdAt: serverTimestamp() });
+      playerNameInput.value='';
+      lastSelectedTeamId = teamId; localStorage.setItem('lastSelectedTeamId', teamId);
     });
 
-    recordTeamSelect.addEventListener('change', () => {
-      renderPlayers(recordTeamSelect.value, recordPlayerSelect);
-    });
+    recordTeamSelect.addEventListener('change', () => populatePlayers(recordTeamSelect.value, recordPlayerSelect));
 
-    saveRecordBtn.addEventListener('click', () => {
-      const playerId = recordPlayerSelect.value;
-      if (!playerId) return;
-      const p = players.find(x => x.id === playerId);
-      p.hr += parseInt(hrInput.value)||0;
-      p.hits += parseInt(hitsInput.value)||0;
-      p.pitches += parseInt(pitchesInput.value)||0;
-      p.strikes += parseInt(strikesInput.value)||0;
-      p.saves += parseInt(savesInput.value)||0;
-      saveData();
-      [hrInput,hitsInput,pitchesInput,strikesInput,savesInput].forEach(i => i.value=0);
+    saveRecordBtn.addEventListener('click', async () => {
+      const playerId = recordPlayerSelect.value; if (!playerId) return;
+      const ref = doc(db,'players', playerId);
+      await updateDoc(ref, {
+        hr: increment(toInt(hrInput.value)),
+        hits: increment(toInt(hitsInput.value)),
+        pitches: increment(toInt(pitchesInput.value)),
+        strikes: increment(toInt(strikesInput.value)),
+        saves: increment(toInt(savesInput.value)),
+        updatedAt: serverTimestamp()
+      });
+      [hrInput,hitsInput,pitchesInput,strikesInput,savesInput].forEach(i=>i.value=0);
+      const s = document.getElementById('saveStatus'); s.textContent='저장 완료!'; setTimeout(()=>s.textContent='',1200);
     });
 
     boardTeamFilter.addEventListener('change', renderBoard);
 
-    function showProfile(id) {
-      const p = players.find(x => x.id === id);
-      if (!p) return;
-      currentProfileId = id;
+    function showProfile(id){
+      const p = playersCache.find(x=>x.id===id); if (!p) return; currentProfileId=id;
       profileContent.innerHTML = `
-        <p><b>이름:</b> ${p.name}</p>
-        <p><b>팀:</b> ${teamName(p.teamId)}</p>
-        <p><b>홈런:</b> ${p.hr}</p>
-        <p><b>안타:</b> ${p.hits}</p>
-        <p><b>투구 수:</b> ${p.pitches}</p>
-        <p><b>스트라이크:</b> ${p.strikes}</p>
-        <p><b>세이브:</b> ${p.saves}</p>
-      `;
+        <p><b>이름:</b> ${escapeHtml(p.name)}</p>
+        <p><b>팀:</b> ${escapeHtml(teamName(p.teamId))}</p>
+        <p class="grid grid-cols-5 gap-2 text-sm"><span><b>HR</b> ${p.hr||0}</span><span><b>H</b> ${p.hits||0}</span><span><b>P</b> ${p.pitches||0}</span><span><b>S</b> ${p.strikes||0}</span><span><b>SV</b> ${p.saves||0}</span></p>`;
       profileMemo.value = p.memo || '';
-      playerProfile.classList.remove('hidden');
+      playerProfile.classList.remove('hidden'); window.scrollTo({ top: playerProfile.offsetTop-60, behavior:'smooth' });
     }
-
-    saveMemoBtn.addEventListener('click', () => {
+    saveMemoBtn.addEventListener('click', async () => {
       if (!currentProfileId) return;
-      const p = players.find(x => x.id === currentProfileId);
-      if (p) {
-        p.memo = profileMemo.value;
-        saveData();
-      }
+      await updateDoc(doc(db,'players', currentProfileId), { memo: profileMemo.value, updatedAt: serverTimestamp() });
     });
+    closeProfileBtn.addEventListener('click', ()=> playerProfile.classList.add('hidden'));
 
-    closeProfileBtn.addEventListener('click', () => {
-      playerProfile.classList.add('hidden');
-      currentProfileId = null;
-    });
+    function escapeHtml(str){ return str.replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 
-    renderTeams();
-    renderBoard();
+    subscribeTeams(); subscribePlayers();
   </script>
 </body>
 </html>
