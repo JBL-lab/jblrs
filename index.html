@@ -172,12 +172,18 @@
     const closeProfileBtn = document.getElementById('closeProfileBtn');
 
     let currentProfileId = null;
+    let lastSelectedTeamId = playerTeamSelect.value;
 
     function saveData() {
       localStorage.setItem('teams', JSON.stringify(teams));
       localStorage.setItem('players', JSON.stringify(players));
       renderTeams();
       renderBoard();
+
+      // 선수 추가 시 마지막 선택된 팀 유지
+      if (lastSelectedTeamId) {
+        playerTeamSelect.value = lastSelectedTeamId;
+      }
     }
 
     function renderTeams() {
@@ -251,6 +257,7 @@
       if (!teamId || !name) return;
       players.push({ id: Date.now().toString(), teamId, name, hr:0,hits:0,pitches:0,strikes:0,saves:0, memo:'' });
       playerNameInput.value = '';
+      lastSelectedTeamId = teamId; // 마지막 선택된 팀 저장
       saveData();
     });
 
