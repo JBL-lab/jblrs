@@ -138,29 +138,10 @@
         <button id="closeProfileBtn" class="rounded-xl px-4 py-2 bg-gray-300">닫기</button>
       </div>
     </section>
-
-    <!-- Firebase 설정 가이드 -->
-    <section class="bg-white rounded-2xl shadow p-4">
-      <h2 class="text-lg font-semibold mb-2">Firebase 설정 요약</h2>
-      <ol class="list-decimal pl-6 text-sm space-y-1 text-gray-700">
-        <li>Firebase 콘솔에서 프로젝트 생성 → Firestore 생성</li>
-        <li>Authentication 필요 없음</li>
-        <li>아래 <code>firebaseConfig</code>에 구성값 붙여넣기</li>
-        <li>보안 규칙 테스트용:</li>
-      </ol>
-      <pre class="bg-gray-900 text-gray-100 p-3 rounded-xl overflow-x-auto text-xs">rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
-    }
-  }
-}</pre>
-    </section>
   </main>
 
   <footer class="max-w-5xl mx-auto px-4 py-10 text-center text-xs text-gray-500">
-    Firebase Firestore 공유 버전
+   JBLRecordingSystem
   </footer>
 
   <!-- Firebase + App Logic -->
